@@ -291,3 +291,19 @@ else {
 }
 
 # ...existing code...
+
+# --- Run CCTV Setup Script ---
+$cctvScript = Join-Path -Path (Split-Path -Parent $MyInvocation.MyCommand.Path) -ChildPath ".\Other_scripts\cctv_setup_script.ps1"
+if (Test-Path $cctvScript) {
+    Write-Log "Starting CCTV Setup Script..."
+    try {
+        & $cctvScript
+        Write-Log "CCTV Setup Script completed."
+    }
+    catch {
+        Write-Log "Error running CCTV Setup Script: $_" "ERROR"
+    }
+}
+else {
+    Write-Log "cctv_setup_script.ps1 not found. Skipping CCTV setup." "WARN"
+}
