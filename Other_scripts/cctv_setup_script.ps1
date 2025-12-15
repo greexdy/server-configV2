@@ -77,14 +77,18 @@ try {
         # Unregister existing if any
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
-        # Create new task
+        # Create new task components
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $Username
-        # Note: For simple executable paths, specific arguments should be separated. 
-        # Here we assume a simple command string for demonstration. 
-        # For complex scripts, use: -Execute "powershell.exe" -Argument "-File ..."
-        $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start $StartupCommand"
         
-        Register-ScheduledTask -TaskName $taskName -Trigger $trigger -Action $action -Description "Runs CCTV startup action" -RunLevel Limited -User $Username -Force | Out-Null
+        # Fix: 'start' treats the first quoted argument as a window title. We force an empty title ("") so paths with spaces work.
+        $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start """" ""$StartupCommand"""
+        
+        # Fix: Use a specific Principal for Interactive logon to ensure it runs on the desktop.
+        $principal = New-ScheduledTaskPrincipal -UserId $Username -LogonType Interactive -RunLevel Limited
+
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
+        
+        Register-ScheduledTask -TaskName $taskName -Trigger $trigger -Action $action -Principal $principal -Settings $settings -Description "Runs CCTV startup action" -Force | Out-Null
         
         Write-Host "Scheduled Task '$taskName' created to run '$StartupCommand' at login." -ForegroundColor Green
     }
