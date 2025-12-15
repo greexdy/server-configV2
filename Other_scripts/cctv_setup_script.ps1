@@ -72,25 +72,71 @@ try {
     # 3. Configure Startup Action (Optional)
     if ($EnableStartupAction) {
         Write-Host "Configuring Startup Action..."
-        $taskName = "CCTV_Startup_Action"
         
-        # Unregister existing if any
+        # --- PREPARE ASSETS ---
+        $sharedDir = "C:\ProgramData\CCTV"
+        if (-not (Test-Path $sharedDir)) {
+            New-Item -Path $sharedDir -ItemType Directory -Force | Out-Null
+        }
+        
+        # Locate and Copy Wallpaper
+        $scriptPath = $PSScriptRoot
+        if (-not $scriptPath) { $scriptPath = Get-Location }
+        $sourceImage = Join-Path $scriptPath "..\Images\RTS_Wallpaper.jpg"
+        $destImage = Join-Path $sharedDir "wallpaper.jpg"
+        
+        if (Test-Path $sourceImage) {
+            Copy-Item -Path $sourceImage -Destination $destImage -Force
+            Write-Host "Wallpaper copied to '$destImage'." -ForegroundColor Green
+        }
+        else {
+            Write-Warning "Wallpaper not found at '$sourceImage'. Skipping wallpaper setup."
+        }
+
+        # --- GENERATE LOGIN SCRIPT ---
+        $loginScriptPath = Join-Path $sharedDir "login_script.ps1"
+        $loginScriptContent = @"
+# CCTV Login Helper Script
+# Sets wallpaper and starts application
+
+try {
+    # Set Wallpaper
+    `$wallpaperPath = "$destImage"
+    if (Test-Path `$wallpaperPath) {
+        `$code = @'
+using System;
+using System.Runtime.InteropServices;
+public class Wallpaper {
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+'@
+        Add-Type -TypeDefinition `$code
+        [Wallpaper]::SystemParametersInfo(20, 0, `$wallpaperPath, 3)
+    }
+} catch {
+    # Ignore wallpaper errors to ensure app starts
+}
+
+# Start Application
+Start-Process "$StartupCommand"
+"@
+        Set-Content -Path $loginScriptPath -Value $loginScriptContent -Force
+        
+        # --- CONFIGURE SCHEDULED TASK ---
+        $taskName = "CCTV_Startup_Action"
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
-        # Create new task components
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $Username
+        # Run the helper script hidden
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$loginScriptPath`""
         
-        # Fix: 'start' treats the first quoted argument as a window title. We force an empty title ("") so paths with spaces work.
-        $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start """" ""$StartupCommand"""
-        
-        # Fix: Use a specific Principal for Interactive logon to ensure it runs on the desktop.
         $principal = New-ScheduledTaskPrincipal -UserId $Username -LogonType Interactive -RunLevel Limited
-
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
         
-        Register-ScheduledTask -TaskName $taskName -Trigger $trigger -Action $action -Principal $principal -Settings $settings -Description "Runs CCTV startup action" -Force | Out-Null
+        Register-ScheduledTask -TaskName $taskName -Trigger $trigger -Action $action -Principal $principal -Settings $settings -Description "Runs CCTV startup action and sets wallpaper" -Force | Out-Null
         
-        Write-Host "Scheduled Task '$taskName' created to run '$StartupCommand' at login." -ForegroundColor Green
+        Write-Host "Scheduled Task '$taskName' created." -ForegroundColor Green
     }
     else {
         Write-Host "Startup action is disabled in configuration. Skipping." -ForegroundColor Gray
