@@ -55,7 +55,8 @@ function Set-DutchBelgianLanguageOnly {
         Set-WinUserLanguageList $langs -Force
 
         Write-Host "Set language and keyboard to Dutch (Belgian) - Period only."
-    } catch {
+    }
+    catch {
         Write-Host "Error setting language/keyboard: $_" -ForegroundColor Red
     }
 }
@@ -67,7 +68,8 @@ function Disable-SleepMode {
         powercfg -change -monitor-timeout-ac 0
         powercfg -change -monitor-timeout-dc 0
         Write-Host "Sleep mode and monitor timeout disabled."
-    } catch {
+    }
+    catch {
         Write-Host "Error disabling sleep mode: $_" -ForegroundColor Red
     }
 }
@@ -82,6 +84,9 @@ function Set-DesktopBackground {
             Write-Host "Background image file not found: $ImagePath" -ForegroundColor Red
             return
         }
+        
+        $absPath = (Resolve-Path $ImagePath).Path
+
         Add-Type @"
 using System.Runtime.InteropServices;
 public class Wallpaper {
@@ -92,9 +97,19 @@ public class Wallpaper {
         $SPI_SETDESKWALLPAPER = 0x0014
         $SPIF_UPDATEINIFILE = 0x01
         $SPIF_SENDWININICHANGE = 0x02
-        [Wallpaper]::SystemParametersInfo($SPI_SETDESKWALLPAPER, 0, $ImagePath, $SPIF_UPDATEINIFILE -bor $SPIF_SENDWININICHANGE) | Out-Null
-        Write-Host "Desktop background set to $ImagePath."
-    } catch {
+        [Wallpaper]::SystemParametersInfo($SPI_SETDESKWALLPAPER, 0, $absPath, $SPIF_UPDATEINIFILE -bor $SPIF_SENDWININICHANGE) | Out-Null
+        Write-Host "Desktop background set to $absPath."
+
+        # Set Lock Screen using Policy
+        $policyKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
+        if (-not (Test-Path $policyKey)) {
+            New-Item -Path $policyKey -Force | Out-Null
+        }
+        Set-ItemProperty -Path $policyKey -Name "LockScreenImage" -Value $absPath -Force
+        Write-Host "Lock screen background set via policy to $absPath."
+
+    }
+    catch {
         Write-Host "Error setting desktop background: $_" -ForegroundColor Red
     }
 }
@@ -103,16 +118,19 @@ function Install-Chocolatey {
         $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
         if ($choco) {
             Write-Log "Chocolatey is already installed."
-        } else {
+        }
+        else {
             Write-Log "Installing Chocolatey using winget..."
             winget install --id "Chocolatey.Chocolatey" --exact --source winget --accept-source-agreements --accept-package-agreements --silent
             if (Get-Command choco.exe -ErrorAction SilentlyContinue) {
                 Write-Log "Chocolatey installed successfully."
-            } else {
+            }
+            else {
                 Write-Log "Chocolatey installation failed." "ERROR"
             }
         }
-    } catch {
+    }
+    catch {
         Write-Log "Error installing Chocolatey: $_" "ERROR"
     }
 }
@@ -160,7 +178,8 @@ function Install-SNMP {
     if (Add-WindowsCapability -Online -Name "SNMP.Client~~~~0.0.1.0") {
         # For Windows Server
         Install-WindowsFeature -Name "SNMP" -IncludeManagementTools
-    } else {
+    }
+    else {
         # For Windows 10/11
         Add-WindowsCapability -Online -Name "SNMP.Client~~~~0.0.1.0"
     }
@@ -175,10 +194,12 @@ function Set-Hostname {
         try {
             Rename-Computer -NewName $NewName -Force -ErrorAction Stop
             Write-Log "Hostname changed to $NewName. Reboot required."
-        } catch {
+        }
+        catch {
             Write-Log "Error changing hostname: $_" "ERROR"
         }
-    } else {
+    }
+    else {
         Write-Log "Hostname already set to $NewName."
     }
 }
@@ -190,17 +211,20 @@ function Enable-RDP {
         Write-Log "RDP enabled."
 
         # Enable RDP firewall rule
-            $rdpRule = Get-NetFirewallRule -DisplayName "Remote Desktop" -ErrorAction SilentlyContinue
-            if (-not $rdpRule) {
-                New-NetFirewallRule -DisplayName "Remote Desktop" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 3389
-                Write-Log "RDP firewall rule added."
-            } elseif ($rdpRule.Enabled -ne "True") {
-                Set-NetFirewallRule -DisplayName "Remote Desktop" -Enabled True
-                Write-Log "RDP firewall rule enabled."
-            } else {
-                Write-Log "RDP firewall rule already exists and is enabled."
+        $rdpRule = Get-NetFirewallRule -DisplayName "Remote Desktop" -ErrorAction SilentlyContinue
+        if (-not $rdpRule) {
+            New-NetFirewallRule -DisplayName "Remote Desktop" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 3389
+            Write-Log "RDP firewall rule added."
         }
-    } catch {
+        elseif ($rdpRule.Enabled -ne "True") {
+            Set-NetFirewallRule -DisplayName "Remote Desktop" -Enabled True
+            Write-Log "RDP firewall rule enabled."
+        }
+        else {
+            Write-Log "RDP firewall rule already exists and is enabled."
+        }
+    }
+    catch {
         Write-Log "Error enabling RDP: $_" "ERROR"
     }
 }
@@ -208,25 +232,28 @@ function Enable-RDP {
 # --- Configure Firewall (ICMP + RDP) ---
 function Set-Firewall {
     try {
-            $icmpv4Rule = Get-NetFirewallRule -DisplayName "Allow Inbound ICMPv4 Echo Request" -ErrorAction SilentlyContinue
-            if (-not $icmpv4Rule) {
-                New-NetFirewallRule -DisplayName "Allow Inbound ICMPv4 Echo Request" -Protocol ICMPv4 -IcmpType 8 -Enabled True -Profile Any -Action Allow
-                Write-Log "ICMPv4 firewall rule added."
-            } elseif ($icmpv4Rule.Enabled -ne "True") {
-                Set-NetFirewallRule -DisplayName "Allow Inbound ICMPv4 Echo Request" -Enabled True
-                Write-Log "ICMPv4 firewall rule enabled."
-            }
-
-            $icmpv6Rule = Get-NetFirewallRule -DisplayName "Allow Inbound ICMPv6 Echo Request" -ErrorAction SilentlyContinue
-            if (-not $icmpv6Rule) {
-                New-NetFirewallRule -DisplayName "Allow Inbound ICMPv6 Echo Request" -Protocol ICMPv6 -IcmpType 128 -Enabled True -Profile Any -Action Allow
-                Write-Log "ICMPv6 firewall rule added."
-          
-            } elseif ($icmpv6Rule.Enabled -ne "True") {
-                Set-NetFirewallRule -DisplayName "Allow Inbound ICMPv6 Echo Request" -Enabled True
-                Write-Log "ICMPv6 firewall rule enabled."
+        $icmpv4Rule = Get-NetFirewallRule -DisplayName "Allow Inbound ICMPv4 Echo Request" -ErrorAction SilentlyContinue
+        if (-not $icmpv4Rule) {
+            New-NetFirewallRule -DisplayName "Allow Inbound ICMPv4 Echo Request" -Protocol ICMPv4 -IcmpType 8 -Enabled True -Profile Any -Action Allow
+            Write-Log "ICMPv4 firewall rule added."
         }
-    } catch {
+        elseif ($icmpv4Rule.Enabled -ne "True") {
+            Set-NetFirewallRule -DisplayName "Allow Inbound ICMPv4 Echo Request" -Enabled True
+            Write-Log "ICMPv4 firewall rule enabled."
+        }
+
+        $icmpv6Rule = Get-NetFirewallRule -DisplayName "Allow Inbound ICMPv6 Echo Request" -ErrorAction SilentlyContinue
+        if (-not $icmpv6Rule) {
+            New-NetFirewallRule -DisplayName "Allow Inbound ICMPv6 Echo Request" -Protocol ICMPv6 -IcmpType 128 -Enabled True -Profile Any -Action Allow
+            Write-Log "ICMPv6 firewall rule added."
+          
+        }
+        elseif ($icmpv6Rule.Enabled -ne "True") {
+            Set-NetFirewallRule -DisplayName "Allow Inbound ICMPv6 Echo Request" -Enabled True
+            Write-Log "ICMPv6 firewall rule enabled."
+        }
+    }
+    catch {
         Write-Log "Error configuring firewall: $_" "ERROR"
     }
 }
@@ -254,10 +281,12 @@ if (Test-Path $appInstallScript) {
     try {
         & $appInstallScript
         Write-Log "Application package installations completed."
-    } catch {
+    }
+    catch {
         Write-Log "Error running app-install-script.ps1: $_" "ERROR"
     }
-} else {
+}
+else {
     Write-Log "app-install-script.ps1 not found. Skipping application package installations." "WARN"
 }
 
