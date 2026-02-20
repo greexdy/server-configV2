@@ -25,7 +25,7 @@ cd "path\to\server-config"
 ### 3. Run the Installer Script
 Set the execution policy (if needed) and run the main install script:
 ```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ./main_install_script.ps1
 ```
 .\main_install_script.ps1
